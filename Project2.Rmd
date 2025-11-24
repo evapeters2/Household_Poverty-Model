@@ -1,0 +1,587 @@
+---
+title: "Classifying Household Poverty Levels"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{=html}
+<style>
+h1.title {
+  text-align: center;
+}
+
+h4.author {
+  text-align: center;
+}
+</style>
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;This project aims to create a model to classify a household into one of four poverty levels. To do this we will be looking at information for the head of each household. The main motivation behind this comes from the fact that many poverty stricken households lack the resources or capability to report their income, making it difficult for social programs to properly give out aid. Our model will be using observable household attributes rather than income to classify households into poverty levels. To do this we started by analyzing relationships between predictor variables as well as between predictors and poverty levels. We then came up with our baseline model, and put it through backward elimination to come up with our final model. 
+
+## Data Exploration
+
+#### **Description of the Data**
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;This data set contains many variables that describe the demographics of both individuals and households. Each row represents an individual, totaling to just over 9,000 rows. Each row includes basic individual demographic information such as age, gender, marital status, and years of education, as well as various household attributes such as the material the house is made of, total bedrooms, if the home is overcrowded, and ownership status. In total, the data started with 142 predictor variables and 1 response variable classifying a person into one of four poverty levels: "extreme poverty," "moderate poverty," "vulnerable households," and "non-vulnerable households." Looking at the distribution of this variable, about 62.8% of the individuals were classified as non-vulnerable, 12.7% as vulnerable, 16.6% in moderate poverty, and 7.9% in extreme poverty.
+
+#### **Cleaning the Data**
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;To start, we renamed the variables in order for them to make more sense when working with them for data exploration. We then created many categorical variables by carefully grouping binary variables together into a single column, such as grouping different binary floor material variables into a single floor material variable. After that, we filtered our data to include only rows for heads of the households, since we will be making our model based on those types of individuals. We dealt with NA values by examining why they were occurring, and found the main one to be under the number of tablets row if the family did not own a tablet, so we dealt with those missing values by changing them to 0's. After that 25 NA values remained, so it was reasonable to drop these rows as it is a very small proportion of the data. Finally, we dropped unnecessary columns in our data, which included columns that were now combined into one categorical variable, as well as variables that were about the same except for a few cases, such as number of people in a household versus number of people living in the household, especially since it would be difficult to differentiate between them. 
+
+```{r, echo=FALSE, message=FALSE}
+# Load libraries
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+```
+
+```{r, echo=FALSE, message=FALSE}
+# Read in data
+poverty <- read.csv("poverty.csv", header=T)
+
+# Rename variables and create categorical variables
+poverty <- poverty %>% 
+  rename(head_household = parentesco1) %>%
+  rename(overcrowd_bed = hacdor) %>%
+  rename(num_rooms = rooms) %>%
+  rename(overcrowd_room = hacapo) %>%
+  rename(has_bathroom = v14a) %>%
+  rename(has_fridge = refrig) %>%
+  rename(owns_tablet = v18q) %>%
+  rename(num_tablets = v18q1) %>%
+  rename(total_males = r4h3) %>%
+  rename(total_females = r4m3) %>%
+  rename(total_people = r4t3) %>%
+  rename(num_living = tamviv) %>%
+  rename(years_school = escolari) %>%
+  rename(has_ceiling = cielorazo) %>%
+  rename(disabled = dis) %>%
+  rename(num_children = hogar_nin) %>%
+  rename(num_adults = hogar_adul) %>%
+  rename(num_seniors = hogar_mayor) %>%
+  rename(average_education = meaneduc) %>%
+  rename(num_bedrooms = bedrooms) %>%
+  rename(people_per_room = overcrowding) %>%
+  rename(has_computer = computer) %>%
+  rename(has_tv = television) %>%
+  rename(has_phone = mobilephone) %>%
+  rename(num_phones = qmobilephone) %>%
+  mutate(
+    wall_material = case_when(
+      paredblolad == 1 ~ "Block/Brick",
+      paredzocalo == 1 ~ "Socket",
+      paredpreb == 1 ~ "Prefabricated/Cement",
+      pareddes == 1 ~ "Waste",
+      paredmad == 1 ~ "Wood",
+      paredzinc == 1 ~ "Zinc",
+      paredfibras == 1 ~ "Natural Fibers",
+      paredother == 1 ~ "Other",
+      TRUE ~ NA_character_),
+    floor_material = case_when(
+      pisomoscer == 1 ~ "mosaic/ceramic/terrazo",
+      pisocemento == 1 ~ "cement",
+      pisoother == 1 ~ "other",
+      pisonatur == 1 ~ "natural material",
+      pisonotiene == 1 ~ "no floor",
+      pisomadera == 1 ~ "wood",
+      TRUE ~ NA_character_),
+    roof_material = case_when(
+      techozinc == 1 ~ "metal foil/zinc",
+      techoentrepiso == 1 ~ "fiber cement/mezzanine",
+      techocane == 1 ~ "natural fibers",
+      techootro == 1 ~ "other",
+      TRUE ~ NA_character_),
+    water_supply = case_when(
+      abastaguadentro == 1 ~ "inside",
+      abastaguafuera == 1 ~ "outside",
+      abastaguano == 1 ~ "none",
+      TRUE ~ NA_character_),
+    electricity_source = case_when(
+      public == 1 ~ "public",
+      planpri == 1 ~ "private",
+      noelec == 1 ~ "none",
+      coopele == 1 ~ "cooperative",
+      TRUE ~ NA_character_),
+    toilet_type = case_when(
+      sanitario1 == 1 ~ "none",
+      sanitario2 == 1 ~ "sewer/cesspool",
+      sanitario3 == 1 ~ "septic tank",
+      sanitario5 == 1 ~ "black hole/letrine",
+      sanitario6 == 1 ~ "other",
+      TRUE ~ NA_character_),
+    cooking_energy_source = case_when(
+      energcocinar1 == 1 ~ "none",
+      energcocinar2 == 1 ~ "electricity",
+      energcocinar3 == 1 ~ "gas",
+      energcocinar4 == 1 ~ "wood/charcoal",
+      TRUE ~ NA_character_),
+    garbage_disposal = case_when(
+      elimbasu1 == 1 ~ "tanker truck",
+      elimbasu2 == 1 ~ "burying",
+      elimbasu3 == 1 ~ "burning",
+      elimbasu4 == 1 ~ "thrown away",
+      elimbasu5 == 1 ~ "river/creek",
+      elimbasu6 == 1 ~ "other",
+      TRUE ~ NA_character_),
+    wall_status = case_when(
+      epared1 == 1 ~ "bad",
+      epared2 == 1 ~ "regular",
+      epared3 == 1 ~ "good",
+      TRUE ~ NA_character_),
+    roof_status = case_when(
+      etecho1 == 1 ~ "bad",
+      etecho2 == 1 ~ "regular",
+      etecho3 == 1 ~ "good",
+      TRUE ~ NA_character_), 
+    floor_status = case_when(
+      eviv1 == 1 ~ "bad",
+      eviv2 == 1 ~ "regular",
+      eviv3 == 1 ~ "good",
+      TRUE ~ NA_character_), 
+    gender = case_when(
+      male == 1 ~ "male",
+      female == 1 ~ "female",
+      TRUE ~ NA_character_),
+    marital_status = case_when(
+      estadocivil1 == 1 ~ "too young",
+      estadocivil2 == 1 ~ "Free/Coupled Union",
+      estadocivil3 == 1 ~ "Married",
+      estadocivil4 == 1 ~ "Divorced",
+      estadocivil5 == 1 ~ "Separated",
+      estadocivil6 == 1 ~ "Widowed",
+      estadocivil7 == 1 ~ "Single",
+      TRUE ~ NA_character_),
+    education_level = case_when(
+      instlevel1 == 1 ~ "none",
+      instlevel2 == 1 ~ "incomplete primary",
+      instlevel3 == 1 ~ "complete primary",
+      instlevel4 == 1 ~ "incomplete academic secondary",
+      instlevel5 == 1 ~ "complete academic secondary",
+      instlevel6 == 1 ~ "incomplete technical secondary",
+      instlevel7 == 1 ~ "complete technical secondary",
+      instlevel8 == 1 ~ "undergraduate and higher education",
+      instlevel9 == 1 ~ "postgraduate higher education",
+      TRUE ~ NA_character_),
+    ownership_status = case_when(
+      tipovivi1 == 1 ~ "own and fully paid",
+      tipovivi2 == 1 ~ "own and still paying",
+      tipovivi3 == 1 ~ "renting",
+      tipovivi4 == 1 ~ "precarious",
+      tipovivi5 == 1 ~ "other",
+      TRUE ~ NA_character_),
+    region = case_when(
+      lugar1 == 1 ~ "Central",
+      lugar2 == 1 ~ "Chorotega",
+      lugar3 == 1 ~ "Central Pacific",
+      lugar4 == 1 ~ "Brunca",
+      lugar5 == 1 ~ "Huetar Atlantic",
+      lugar6 == 1 ~ "Huetar North",
+      TRUE ~ NA_character_),
+    geographic_class = case_when(
+      area1 == 1 ~ "urban",
+      area2 == 1 ~ "rural",
+      TRUE ~ NA_character_)
+    )
+
+# Create a variable for if the household is overcrowded
+poverty <- poverty %>%
+  mutate(overcrowded = ifelse(overcrowd_bed == 1 | overcrowd_room == 1, 1, 0))
+
+# Filter to keep only household heads 
+poverty <- poverty %>%
+  filter(head_household == 1)
+
+# Change NA's to 0's in num_tablets if the person doesn't own a tablet
+poverty <- poverty %>%
+  mutate(num_tablets = if_else(owns_tablet == 0 & is.na(num_tablets), 0, num_tablets))  
+
+# Drop unnecessary columns
+poverty <- poverty %>%
+  select(-c(r4h1, r4h2, r4m1, r4m2, r4t1, r4t2, paredblolad, paredzocalo, paredpreb, pareddes, paredmad, paredzinc, paredfibras, paredother,  pisomoscer, pisocemento, pisoother, pisonatur, pisonotiene, pisomadera, techozinc, techoentrepiso, techocane, techootro, abastaguadentro, abastaguafuera, abastaguano, public, planpri, noelec, coopele, sanitario1, sanitario2, sanitario3, sanitario5, sanitario6, energcocinar1, energcocinar2, energcocinar3, energcocinar4, elimbasu1, elimbasu2, elimbasu3, elimbasu4, elimbasu5, elimbasu6, epared1, epared2, epared3, etecho1, etecho2, etecho3, eviv1, eviv2, eviv3, male, female, estadocivil1, estadocivil2, estadocivil3, estadocivil4, estadocivil5, estadocivil6, estadocivil7, instlevel1, instlevel2, instlevel3, instlevel4, instlevel5, instlevel6, instlevel7, instlevel8, instlevel9, tipovivi1, tipovivi2, tipovivi3, tipovivi4, tipovivi5, lugar1, lugar2, lugar3, lugar4, lugar5, lugar6, area1, area2, SQBescolari, SQBage, SQBhogar_total, SQBedjefe, SQBhogar_nin, SQBovercrowding, SQBdependency, SQBmeaned, agesq, parentesco2, parentesco3, parentesco4, parentesco5, parentesco6, parentesco7, parentesco8, parentesco9, parentesco10, parentesco11, parentesco12, rez_esc, dependency, edjefe, edjefa, r4t1, r4t2, v2a1, Id, idhogar, tamhog, hhsize, hogar_total, overcrowd_bed, overcrowd_room, num_living))
+
+# Only 25 NA's in various columns, so is reasonable to drop
+poverty <- na.omit(poverty)
+```
+
+#### **Visualizing Relationships**
+
+```{r, echo=FALSE, message=FALSE, fig.align='center'}
+# Visualize Binary Features
+binary_data <- poverty %>%
+  select(Target, has_fridge, has_bathroom, has_ceiling, has_computer, has_tv, has_phone) %>%
+  pivot_longer(cols = starts_with("has_"), names_to = "asset", values_to = "ownership")
+
+binary_proportions <- binary_data %>%
+  group_by(Target, asset, ownership) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  group_by(Target, asset) %>%
+  mutate(proportion = count / sum(count))
+
+# Define a named vector for the custom labels
+labels <- c(has_tv = "Has TV", has_fridge = "Has Fridge", has_bathroom = "Has Bathroom",
+            has_computer = "Has Computer", has_ceiling = "Has Ceiling", has_phone = "Has Phone")
+
+# Create the plot with custom facet labels
+ggplot(binary_proportions, aes(x = as.factor(Target), y = proportion, fill = as.factor(ownership))) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ asset, scales = "fixed", labeller = labeller(asset = labels)) +
+  labs(x = "Poverty Level", y = "Proportion", fill = "Ownership", title = "Figure 1: Ownership of Assets by Poverty Level") + scale_fill_manual(values = c("lightblue", "skyblue4"), labels = c("No", "Yes")) + ylim(0, 1) + theme_minimal() + theme(plot.title = element_text(size = 14, hjust = 0.5))
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Figure 1 visualizes the relationships between a household's poverty level (1 being extreme poverty and 4 being non-vulnerable households) and six different possible binary predictors. We can see that the more a household is in poverty, the less likely they are to have a TV, computer, ceiling, phone, and fridge. This trend is most apparent for having a TV and having a ceiling. The bar plot visualizing if the household has a bathroom does not have any significant differences for the four levels. This visualization indicates that there are some notable relationships between poverty status and most of the binary predictors displayed above.
+
+```{r, echo=FALSE, message=FALSE, fig.align='center'}
+# Add a new column with categorized num_bedrooms
+poverty <- poverty %>%
+  mutate(num_bedrooms_cat = ifelse(num_bedrooms >= 5, "5+", as.character(num_bedrooms)))
+
+# Add a new column with descriptive labels for Target
+poverty <- poverty %>%
+  mutate(target_new = factor(case_when(
+    Target == 1 ~ "Extreme\nPoverty",
+    Target == 2 ~ "Moderate\nPoverty",
+    Target == 3 ~ "Vulnerable\nHouseholds",
+    Target == 4 ~ "Non-Vulnerable\nHouseholds"
+  ), levels = c(
+    "Extreme\nPoverty",
+    "Moderate\nPoverty",
+    "Vulnerable\nHouseholds",
+    "Non-Vulnerable\nHouseholds"
+  )))
+
+# Group target into 2 categories
+poverty <- poverty %>%
+  mutate(target_group = case_when(
+    Target %in% 1:3 ~ "Vulnerable and Poverty Households",
+    Target == 4 ~ "Non-Vulnerable Households"
+  ))
+
+# Group number of children into categories
+poverty <- poverty %>%
+  mutate(num_children_cat = case_when(
+    num_children == 0 ~ "0",
+    num_children == 1 ~ "1",
+    num_children == 2 ~ "2",
+    num_children == 3 ~ "3",
+    num_children == 4 ~ "4",
+    num_children >= 5 ~ "5+"))
+
+ ggplot(poverty, aes(x = factor(overcrowded), fill = factor(num_children_cat))) +
+  geom_bar(position = "fill") +
+  labs(title = "Figure 2: Overcrowded Status by Number of Children", x = "Overcrowded Status", fill= "Number of Children") +
+  theme_classic() +
+  scale_y_continuous(labels = scales::percent) +
+     scale_x_discrete(labels = c("1" = "Overcrowded", "0" = "Not Overcrowded")) +
+  theme(axis.title.y = element_blank(), plot.title = element_text(size = 14, hjust = 0.5)) +
+  scale_fill_viridis_d()
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Figure 2 shows the relationship between the number of children a household has and if their household is overcrowded or not. We thought this was an important relationship between predictor variables, as the two statuses vary greatly for these categories. Looking at the coloring of the two bars we can see that there is a much greater prevalence of having between 0 and 2 children compared to having 3 or more for a household that is not overcrowded. On the contrary, for households that are overcrowded the number of children varies much more with all categories from 2 children and on being larger compared to households that aren't overcrowded. This relationship shows that overall, households are more likely to be overcrowded if they have more than 1 child. 
+
+```{r, echo=FALSE, message=FALSE, fig.align='center'}
+ ggplot(poverty, aes(x = years_school, fill = factor(target_group))) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Figure 3: Years of School by Poverty Status", x = "Years of School", y = "Density", fill = "Poverty Status") +
+  theme_classic () +
+  theme(plot.title = element_text(size = 14, hjust = 0.5),
+        legend.position = "bottom",
+        legend.title = element_text(hjust = 0.5),
+        legend.box = "horizontal") +
+  scale_fill_manual(values = c("#440154", "#1F9E89")) +
+  guides(fill = guide_legend(title.position = "top", reverse = TRUE)) 
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Figure 3 shows the relationship between how many years of school the head of the household has completed and their poverty status. Different from the original poverty levels, for this graph we split them into 2, with vulnerable and poverty households being levels 1-3, and non-vulnerable households being level 4. We thought this would be a good option for visualization purposes because many trends we looked at were very similar for levels 1-3, as those are the households that do have some sort of financial difficulty.
+
+```{r, echo=FALSE, message=FALSE, fig.align='center'}
+ggplot(poverty, aes(x = wall_material, fill = as.factor(Target))) +
+  geom_bar(position = "fill") +
+  labs(
+    x = "Wall Material",
+    y = "Proportion",
+    fill = "Poverty Status",
+    title = "Figure 4: Wall Material by Poverty Status"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 14, hjust = 0.5),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 8),
+    legend.key.width = unit(1, "cm")
+  ) +
+  scale_fill_viridis_d(
+    labels = c(
+      "Extreme Poverty",
+      "Moderate Poverty",
+      "Vulnerable Households",
+      "Non-Vulnerable Households"
+    )
+  )
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Figure 4 shows the proportion of each poverty status for different wall materials, showing that there is a difference in wall material based on the poverty status of an individual. The figure shows that there are no vulnerable households with natural fiber as a wall material. A large majority of vulnerable households have wall material that is considered waste. This figure also shows that those who are in the moderate poverty category have about equal proportions in each of the wall material categories. This means that individuals in the moderate poverty category have all different types of wall materials. The figure also shows that more individuals in the extreme poverty category have a wall material of natural fibers than other wall materials. Lastly, we see that individuals in the non-vulnerable household category have houses mainly made of blocks or bricks and other materials. 
+
+## The Statistical Model
+
+```{r, warning=FALSE, echo=FALSE, include=FALSE}
+library(nnet)
+library(caret)
+library(pROC)
+
+# Delete unnecessary columns to create our model
+ModelData <- poverty %>% select(-c(target_new, target_group, num_bedrooms_cat, num_children_cat, head_household))
+
+# Split data into training and testing
+set.seed(24)
+train.inds <- sample(1:nrow(ModelData), floor(.75*nrow(ModelData)), replace=F)
+dat.tr <- ModelData[train.inds,]
+dat.te <- ModelData[-train.inds,]
+
+# Baseline model
+BaselineModel <- multinom(Target ~ ., data = dat.tr)
+summary(BaselineModel)
+
+# Backward elimination
+BackwardModel <- step(BaselineModel, trace=0, direction ="backward")
+summary(BackwardModel)
+
+# Record predictions
+preds.te <- predict(BackwardModel, newdata = dat.te, type = "class")
+
+# Create confusion matrix for test data (predictions vs actual)
+conf.mat.te <- confusionMatrix(factor(preds.te), factor(dat.te$Target))
+
+# Print confusion matrix
+print(conf.mat.te)
+
+# Extract individual metrics from the confusion matrix
+accuracy <- conf.mat.te$overall['Accuracy']
+sensitivity <- conf.mat.te$byClass[, 'Sensitivity']  # Sensitivity for each class
+specificity <- conf.mat.te$byClass[, 'Specificity']  # Specificity for each class
+
+# Print the metrics
+cat("Accuracy: ", accuracy, "\n")
+cat("Sensitivity for each class: \n", sensitivity, "\n")
+cat("Specificity for each class: \n", specificity, "\n")
+
+# Calculate kappa
+weighted_kappa <- conf.mat.te$overall['Kappa']
+cat("Weighted Kappa: ", weighted_kappa, "\n")
+```
+
+#### **Description of the Model**
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;We developed a prediction model to assess the poverty status of individuals based on various demographic factors. We chose a multinomial logistic regression model because poverty status has four possible categories: extreme poverty, moderate poverty, vulnerable households, and non-vulnerable households. To create the model, we included a comprehensive set of variables, excluding those directly related to the target variable and that we created from the other variables (such as different categorizations of the number of bedrooms). To select the most relevant variables, we explored various model selection techniques, including both forward and backward selection. After testing, we chose backward selection. This approach was more efficient and avoided issues we encountered with other methods, such as errors stemming from certain categories of floor materials in the testing data that were absent in the training data using forward selection. While both forward and backward selection produced identical evaluation metrics, backward selection took less time to run. Through backward selection, the model reduced the number of variables from 41 to 17. The significant variables included factors such as whether the head of household has a bathroom, ownership of a tablet, the total number of males and females in the household, total household size, years of schooling, presence of a ceiling, disability status, the number of adults in the household, average education level, people per room, number of phones, age, type of toilet, roof condition, marital status, and geographic classification.
+
+## Results
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;When comparing the baseline model to the final model, the final model has far fewer predictors. This makes the model easier to interpret than the baseline. We can see this when comparing AIC scores. The baseline model has an AIC score of 3577.269 while the final model has an AIC score of 3425.673, suggesting that the final model balances goodness of fit and complexity better than the baseline. The baseline model does have a slightly lower residual deviance of 3079.269 compared to the final model with a residual deviance of 3275.673. This indicates that the baseline model fits slightly better which is often expected when including all possible predictors.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;For the final model, extreme poverty was chosen as the baseline category. For a one-unit increase in a feature, the coefficient represents the log odds of being in another poverty class relative to the baseline. This interpretation gets easier to understand after exponentiating the coefficients. After applying exponentiation, the coefficients represent the likelihood of an instance being in a particular class compared to the baseline. For example, when looking at the feature has_bathroom, households with a bathroom are much more likely to be defined in classes 3 or 4 (vulnerable or non-vulnerable) than class 1 (extreme poverty) as the coefficients are both very high positive values before exponentiating (13.79 and 13.07). Typically these coefficients are not outside of the range of -1 to 1, but for the features describing if the household has a bathroom and the toilet type "none", these coefficients are extremely large, indicating that not having a bathroom is a very telling indicator to if a person is in extreme poverty.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;When looking at marital status as separated, we can see that the exponential coefficients are as follows: 1.037, 0.5235, and 0.4351 for categories 2, 3, and 4 (moderate poverty, vulnerable, and non-vulnerable). An individual whose marital status is separated is 3.76% more likely to be in moderate poverty than extreme poverty, 47.65% less likely to be in class vulnerable than extreme poverty, and 56.49% less likely to be in class non-vulnerable than extreme poverty. When looking at marital status as single, we can see that a person who is single is 78.01% more likely to be in moderate poverty than extreme poverty, 6.78% more likely to be in class vulnerable than extreme poverty, and 18.15% less likely to be in class non-vulnerable than extreme poverty. According to the final model coefficients, if a person is single or separated, they are more likely to be in class extreme poverty than non-vulnerable which is an interesting finding.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The final model using the training data had an overall accuracy of 69.5%. This model is doing well, considering that the model works to predict four classes. Digging deeper into the performance of the model, we found the sensitivity for each class to be 23.13%, 29.29%, 5.12%, and 95.31%. The sensitivity for vulnerable households is very low meaning that the model is not identifying people in this group well. We found that the specificity for each class was 97.73%, 93.27%, 97.99%, and 38.54%. The specificity for the non-vulnerable households is low. A low specificity for non-vulnerable households means that the model is not performing well at identifying observations that are not non-vulnerable households. These two evaluations lead us to believe that our model is over-categorizing people into non-vulnerable households. Our model has a weighted kappa value of 0.1945. This value is low but it is positive indicating that the model may be making many misclassifications between categories that are far apart such as predicting non-vulnerable when it should be extreme poverty.
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The final model using the testing data achieved an overall accuracy of 66.1%. When analyzing the model's performance, we found the sensitivity for each class to be 14.89%, 21.24%, 4.76%, and 93.85%. We found the specificity for each class to be 98.16%, 92.66%, 98.70%, and 28.69%. Again, we see that the model struggles in identifying vulnerable households, and has trouble identifying households that are not non-vulnerable households. This is likely because non-vulnerable households make up about 66% of our data. Our model evaluating the testing data also does slightly worse than our model using the training data. This could be because the model is overfit to the training data. Overall, both models perform well considering the fact that we are trying to predict four classes instead of a binary class.
+
+```{r, echo=FALSE, fig.align='center'}
+# Extract the table
+cm_table <- as.table(conf.mat.te$table)
+cm_df <- as.data.frame(cm_table)
+colnames(cm_df) <- c("Prediction", "Reference", "Freq")
+
+# Create confusion matrix
+ggplot(cm_df, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile() + geom_text(aes(label = Freq), color = "white", size = 5) +
+  scale_fill_gradient(low = "#b2d7f1", high = "#235b93") +
+  labs(title = "Figure 5: Confusion Matrix Heatmap of Testing Results", y = "Prediction", x= "Actual") + theme_minimal() +theme(legend.position = "none") +
+  theme(plot.title = element_text(size = 14, hjust = 0.5))
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Figure 5 visualizes the results of the model on the testing data set. It shows the number of predictions for each group compared to the actual poverty placements. We can see that the majority of non-vulnerable groups (4) are being accurately predicted, along with this group being the largest group in the data. The smallest number of observations falls under vulnerable households (3), as the model struggles to predict this group accurately.
+
+Our model can be a useful tool in identifying the classification of poverty for households in the region this data set was collected. This model could be a solid first step in identifying households that may need aid, but makes mistakes and should not be the only process used.
+
+```{r, echo=FALSE, include=FALSE}
+# Read in testing data
+testing <- read.csv("poverty-test-blinded.csv", header=T)
+
+# Rename variables and create categorical variables
+testing <- testing %>%
+  rename(head_household = parentesco1) %>%
+  rename(overcrowd_bed = hacdor) %>%
+  rename(num_rooms = rooms) %>%
+  rename(overcrowd_room = hacapo) %>%
+  rename(has_bathroom = v14a) %>%
+  rename(has_fridge = refrig) %>%
+  rename(owns_tablet = v18q) %>%
+  rename(num_tablets = v18q1) %>%
+  rename(total_males = r4h3) %>%
+  rename(total_females = r4m3) %>%
+  rename(total_people = r4t3) %>%
+  rename(num_living = tamviv) %>%
+  rename(years_school = escolari) %>%
+  rename(has_ceiling = cielorazo) %>%
+  rename(disabled = dis) %>%
+  rename(num_children = hogar_nin) %>%
+  rename(num_adults = hogar_adul) %>%
+  rename(num_seniors = hogar_mayor) %>%
+  rename(average_education = meaneduc) %>%
+  rename(num_bedrooms = bedrooms) %>%
+  rename(people_per_room = overcrowding) %>%
+  rename(has_computer = computer) %>%
+  rename(has_tv = television) %>%
+  rename(has_phone = mobilephone) %>%
+  rename(num_phones = qmobilephone) %>%
+  mutate(
+    wall_material = case_when(
+      paredblolad == 1 ~ "Block/Brick",
+      paredzocalo == 1 ~ "Socket",
+      paredpreb == 1 ~ "Prefabricated/Cement",
+      pareddes == 1 ~ "Waste",
+      paredmad == 1 ~ "Wood",
+      paredzinc == 1 ~ "Zinc",
+      paredfibras == 1 ~ "Natural Fibers",
+      paredother == 1 ~ "Other",
+      TRUE ~ NA_character_),
+    floor_material = case_when(
+      pisomoscer == 1 ~ "mosaic/ceramic/terrazo",
+      pisocemento == 1 ~ "cement",
+      pisoother == 1 ~ "other",
+      pisonatur == 1 ~ "natural material",
+      pisonotiene == 1 ~ "no floor",
+      pisomadera == 1 ~ "wood",
+      TRUE ~ NA_character_),
+    roof_material = case_when(
+      techozinc == 1 ~ "metal foil/zinc",
+      techoentrepiso == 1 ~ "fiber cement/mezzanine",
+      techocane == 1 ~ "natural fibers",
+      techootro == 1 ~ "other",
+      TRUE ~ NA_character_),
+    water_supply = case_when(
+      abastaguadentro == 1 ~ "inside",
+      abastaguafuera == 1 ~ "outside",
+      abastaguano == 1 ~ "none",
+      TRUE ~ NA_character_),
+    electricity_source = case_when(
+      public == 1 ~ "public",
+      planpri == 1 ~ "private",
+      noelec == 1 ~ "none",
+      coopele == 1 ~ "cooperative",
+      TRUE ~ NA_character_),
+    toilet_type = case_when(
+      sanitario1 == 1 ~ "none",
+      sanitario2 == 1 ~ "sewer/cesspool",
+      sanitario3 == 1 ~ "septic tank",
+      sanitario5 == 1 ~ "black hole/letrine",
+      sanitario6 == 1 ~ "other",
+      TRUE ~ NA_character_),
+    cooking_energy_source = case_when(
+      energcocinar1 == 1 ~ "none",
+      energcocinar2 == 1 ~ "electricity",
+      energcocinar3 == 1 ~ "gas",
+      energcocinar4 == 1 ~ "wood/charcoal",
+      TRUE ~ NA_character_),
+    garbage_disposal = case_when(
+      elimbasu1 == 1 ~ "tanker truck",
+      elimbasu2 == 1 ~ "burying",
+      elimbasu3 == 1 ~ "burning",
+      elimbasu4 == 1 ~ "thrown away",
+      elimbasu5 == 1 ~ "river/creek",
+      elimbasu6 == 1 ~ "other",
+      TRUE ~ NA_character_),
+    wall_status = case_when(
+      epared1 == 1 ~ "bad",
+      epared2 == 1 ~ "regular",
+      epared3 == 1 ~ "good",
+      TRUE ~ NA_character_),
+    roof_status = case_when(
+      etecho1 == 1 ~ "bad",
+      etecho2 == 1 ~ "regular",
+      etecho3 == 1 ~ "good",
+      TRUE ~ NA_character_),
+    floor_status = case_when(
+      eviv1 == 1 ~ "bad",
+      eviv2 == 1 ~ "regular",
+      eviv3 == 1 ~ "good",
+      TRUE ~ NA_character_),
+    gender = case_when(
+      male == 1 ~ "male",
+      female == 1 ~ "female",
+      TRUE ~ NA_character_),
+    marital_status = case_when(
+      estadocivil1 == 1 ~ "too young",
+      estadocivil2 == 1 ~ "Free/Coupled Union",
+      estadocivil3 == 1 ~ "Married",
+      estadocivil4 == 1 ~ "Divorced",
+      estadocivil5 == 1 ~ "Separated",
+      estadocivil6 == 1 ~ "Widowed",
+      estadocivil7 == 1 ~ "Single",
+      TRUE ~ NA_character_),
+    education_level = case_when(
+      instlevel1 == 1 ~ "none",
+      instlevel2 == 1 ~ "incomplete primary",
+      instlevel3 == 1 ~ "complete primary",
+      instlevel4 == 1 ~ "incomplete academic secondary",
+      instlevel5 == 1 ~ "complete academic secondary",
+      instlevel6 == 1 ~ "incomplete technical secondary",
+      instlevel7 == 1 ~ "complete technical secondary",
+      instlevel8 == 1 ~ "undergraduate and higher education",
+      instlevel9 == 1 ~ "postgraduate higher education",
+      TRUE ~ NA_character_),
+    ownership_status = case_when(
+      tipovivi1 == 1 ~ "own and fully paid",
+      tipovivi2 == 1 ~ "own and still paying",
+      tipovivi3 == 1 ~ "renting",
+      tipovivi4 == 1 ~ "precarious",
+      tipovivi5 == 1 ~ "other",
+      TRUE ~ NA_character_),
+    region = case_when(
+      lugar1 == 1 ~ "Central",
+      lugar2 == 1 ~ "Chorotega",
+      lugar3 == 1 ~ "Central Pacific",
+      lugar4 == 1 ~ "Brunca",
+      lugar5 == 1 ~ "Huetar Atlantic",
+      lugar6 == 1 ~ "Huetar North",
+      TRUE ~ NA_character_),
+    geographic_class = case_when(
+      area1 == 1 ~ "urban",
+      area2 == 1 ~ "rural",
+      TRUE ~ NA_character_)
+    )
+
+# Create a variable for if the household is overcrowded
+testing <- testing %>%
+  mutate(overcrowded = ifelse(overcrowd_bed == 1 | overcrowd_room == 1, 1, 0))
+
+# Filter to keep only household heads
+testing <- testing %>%
+  filter(head_household == 1)
+
+# Change NA's to 0's in num_tablets if the person doesn't own a tablet
+testing <- testing %>%
+  mutate(num_tablets = if_else(owns_tablet == 0 & is.na(num_tablets), 0, num_tablets))
+
+# Drop unnecessary columns
+testing <- testing %>%
+  select(-c(r4h1, r4h2, r4m1, r4m2, r4t1, r4t2, paredblolad, paredzocalo, paredpreb, pareddes, paredmad, paredzinc, paredfibras, paredother,  pisomoscer, pisocemento, pisoother, pisonatur, pisonotiene, pisomadera, techozinc, techoentrepiso, techocane, techootro, abastaguadentro, abastaguafuera, abastaguano, public, planpri, noelec, coopele, sanitario1, sanitario2, sanitario3, sanitario5, sanitario6, energcocinar1, energcocinar2, energcocinar3, energcocinar4, elimbasu1, elimbasu2, elimbasu3, elimbasu4, elimbasu5, elimbasu6, epared1, epared2, epared3, etecho1, etecho2, etecho3, eviv1, eviv2, eviv3, male, female, estadocivil1, estadocivil2, estadocivil3, estadocivil4, estadocivil5, estadocivil6, estadocivil7, instlevel1, instlevel2, instlevel3, instlevel4, instlevel5, instlevel6, instlevel7, instlevel8, instlevel9, tipovivi1, tipovivi2, tipovivi3, tipovivi4, tipovivi5, lugar1, lugar2, lugar3, lugar4, lugar5, lugar6, area1, area2, SQBescolari, SQBage, SQBhogar_total, SQBedjefe, SQBhogar_nin, SQBovercrowding, SQBdependency, SQBmeaned, agesq, parentesco2, parentesco3, parentesco4, parentesco5, parentesco6, parentesco7, parentesco8, parentesco9, parentesco10, parentesco11, parentesco12, rez_esc, dependency, edjefe, edjefa, r4t1, r4t2, v2a1, idhogar, tamhog, hhsize, hogar_total, overcrowd_bed, overcrowd_room, num_living))
+
+# Drop 'Target'
+testing$Target <- NULL
+
+
+# Apply model and save to csv
+testing.results <- predict(BackwardModel, newdata = testing, type = "class")
+final_df <- data.frame(testing$Id, testing.results)
+write.csv(final_df, file = "final_predictions.csv", row.names = FALSE)
+```
